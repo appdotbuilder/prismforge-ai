@@ -1,61 +1,169 @@
+import { db } from '../db';
+import { experimentsTable, promptsTable } from '../db/schema';
 import { type Experiment } from '../schema';
+import { eq, and } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
-export async function createExperiment(promptId: string, name: string, variants: Record<string, any>): Promise<Experiment> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is creating an A/B test experiment for prompt versions or models.
-    return Promise.resolve({
-        id: 'experiment_1',
+export const createExperiment = async (promptId: string, name: string, variants: Record<string, any>): Promise<Experiment> => {
+  try {
+    // Verify prompt exists
+    const prompt = await db.select()
+      .from(promptsTable)
+      .where(eq(promptsTable.id, promptId))
+      .execute();
+
+    if (!prompt || prompt.length === 0) {
+      throw new Error(`Prompt with ID ${promptId} not found`);
+    }
+
+    // Create experiment record
+    const result = await db.insert(experimentsTable)
+      .values({
+        id: randomUUID(),
         prompt_id: promptId,
         name: name,
         status: 'draft',
-        variants: variants,
-        created_at: new Date()
-    });
-}
+        variants: variants
+      })
+      .returning()
+      .execute();
 
-export async function getExperimentById(id: string): Promise<Experiment | null> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching an experiment by its ID.
-    return null;
-}
+    const experiment = result[0];
+    return {
+      ...experiment,
+      variants: experiment.variants as Record<string, unknown>
+    };
+  } catch (error) {
+    console.error('Experiment creation failed:', error);
+    throw error;
+  }
+};
 
-export async function getExperimentsByPromptId(promptId: string): Promise<Experiment[]> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching all experiments for a prompt.
-    return [];
-}
+export const getExperimentById = async (id: string): Promise<Experiment | null> => {
+  try {
+    const result = await db.select()
+      .from(experimentsTable)
+      .where(eq(experimentsTable.id, id))
+      .execute();
 
-export async function startExperiment(experimentId: string): Promise<Experiment> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is starting/activating an A/B test experiment.
-    return Promise.resolve({
-        id: experimentId,
-        prompt_id: 'prompt_1',
-        name: 'Running Experiment',
-        status: 'running',
-        variants: {},
-        created_at: new Date()
-    });
-}
+    if (result.length === 0) {
+      return null;
+    }
 
-export async function stopExperiment(experimentId: string): Promise<Experiment> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is stopping an experiment and marking it completed.
-    return Promise.resolve({
-        id: experimentId,
-        prompt_id: 'prompt_1',
-        name: 'Completed Experiment',
-        status: 'completed',
-        variants: {},
-        created_at: new Date()
-    });
-}
+    const experiment = result[0];
+    return {
+      ...experiment,
+      variants: experiment.variants as Record<string, unknown>
+    };
+  } catch (error) {
+    console.error('Failed to fetch experiment by ID:', error);
+    throw error;
+  }
+};
 
-export async function runExperimentComparison(experimentId: string, input: Record<string, any>): Promise<{ variantA: any; variantB: any }> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is running side-by-side comparison for A/B testing.
-    return Promise.resolve({
-        variantA: { content: 'Response from variant A', tokens: 100, latency: 500 },
-        variantB: { content: 'Response from variant B', tokens: 120, latency: 480 }
-    });
-}
+export const getExperimentsByPromptId = async (promptId: string): Promise<Experiment[]> => {
+  try {
+    const result = await db.select()
+      .from(experimentsTable)
+      .where(eq(experimentsTable.prompt_id, promptId))
+      .execute();
+
+    return result.map(experiment => ({
+      ...experiment,
+      variants: experiment.variants as Record<string, unknown>
+    }));
+  } catch (error) {
+    console.error('Failed to fetch experiments by prompt ID:', error);
+    throw error;
+  }
+};
+
+export const startExperiment = async (experimentId: string): Promise<Experiment> => {
+  try {
+    const result = await db.update(experimentsTable)
+      .set({ status: 'running' })
+      .where(eq(experimentsTable.id, experimentId))
+      .returning()
+      .execute();
+
+    if (!result || result.length === 0) {
+      throw new Error(`Experiment with ID ${experimentId} not found`);
+    }
+
+    const experiment = result[0];
+    return {
+      ...experiment,
+      variants: experiment.variants as Record<string, unknown>
+    };
+  } catch (error) {
+    console.error('Failed to start experiment:', error);
+    throw error;
+  }
+};
+
+export const stopExperiment = async (experimentId: string): Promise<Experiment> => {
+  try {
+    const result = await db.update(experimentsTable)
+      .set({ status: 'completed' })
+      .where(eq(experimentsTable.id, experimentId))
+      .returning()
+      .execute();
+
+    if (!result || result.length === 0) {
+      throw new Error(`Experiment with ID ${experimentId} not found`);
+    }
+
+    const experiment = result[0];
+    return {
+      ...experiment,
+      variants: experiment.variants as Record<string, unknown>
+    };
+  } catch (error) {
+    console.error('Failed to stop experiment:', error);
+    throw error;
+  }
+};
+
+export const runExperimentComparison = async (experimentId: string, input: Record<string, any>): Promise<{ variantA: any; variantB: any }> => {
+  try {
+    // Fetch the experiment to get variants
+    const experiment = await getExperimentById(experimentId);
+    
+    if (!experiment) {
+      throw new Error(`Experiment with ID ${experimentId} not found`);
+    }
+
+    if (experiment.status !== 'running') {
+      throw new Error(`Experiment ${experimentId} is not running`);
+    }
+
+    // Extract variants from the experiment
+    const variants = experiment.variants as Record<string, any>;
+    const variantKeys = Object.keys(variants);
+
+    if (variantKeys.length < 2) {
+      throw new Error('Experiment must have at least 2 variants for comparison');
+    }
+
+    // For this implementation, we'll simulate responses
+    // In a real scenario, this would call the actual models/prompts
+    const variantA = {
+      content: `Response from ${variantKeys[0]} with input: ${JSON.stringify(input)}`,
+      tokens: Math.floor(Math.random() * 100) + 50,
+      latency: Math.floor(Math.random() * 200) + 300,
+      variant_config: variants[variantKeys[0]]
+    };
+
+    const variantB = {
+      content: `Response from ${variantKeys[1]} with input: ${JSON.stringify(input)}`,
+      tokens: Math.floor(Math.random() * 100) + 50,
+      latency: Math.floor(Math.random() * 200) + 300,
+      variant_config: variants[variantKeys[1]]
+    };
+
+    return { variantA, variantB };
+  } catch (error) {
+    console.error('Failed to run experiment comparison:', error);
+    throw error;
+  }
+};

@@ -1,47 +1,123 @@
+import { db } from '../db';
+import { projectsTable } from '../db/schema';
 import { type CreateProjectInput, type Project, type UpdateProjectInput } from '../schema';
+import { eq } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
 export async function createProject(input: CreateProjectInput): Promise<Project> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is creating a new project within an organization.
-    return Promise.resolve({
-        id: 'project_1',
+  try {
+    // Insert project record
+    const result = await db.insert(projectsTable)
+      .values({
+        id: randomUUID(),
         org_id: input.org_id,
         name: input.name,
         description: input.description || null,
-        tags: input.tags || [],
-        created_at: new Date(),
-        updated_at: new Date()
-    });
+        tags: input.tags || []
+      })
+      .returning()
+      .execute();
+
+    const project = result[0];
+    return {
+      ...project,
+      tags: project.tags as string[] // Cast jsonb back to string array
+    };
+  } catch (error) {
+    console.error('Project creation failed:', error);
+    throw error;
+  }
 }
 
 export async function getProjectById(id: string): Promise<Project | null> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching a project by its ID.
-    return null;
+  try {
+    const results = await db.select()
+      .from(projectsTable)
+      .where(eq(projectsTable.id, id))
+      .execute();
+
+    if (results.length === 0) {
+      return null;
+    }
+
+    const project = results[0];
+    return {
+      ...project,
+      tags: project.tags as string[] // Cast jsonb back to string array
+    };
+  } catch (error) {
+    console.error('Project fetch failed:', error);
+    throw error;
+  }
 }
 
 export async function getProjectsByOrgId(orgId: string): Promise<Project[]> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching all projects within an organization.
-    return [];
+  try {
+    const results = await db.select()
+      .from(projectsTable)
+      .where(eq(projectsTable.org_id, orgId))
+      .execute();
+
+    return results.map(project => ({
+      ...project,
+      tags: project.tags as string[] // Cast jsonb back to string array
+    }));
+  } catch (error) {
+    console.error('Projects fetch failed:', error);
+    throw error;
+  }
 }
 
 export async function updateProject(input: UpdateProjectInput): Promise<Project> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is updating project details.
-    return Promise.resolve({
-        id: input.id,
-        org_id: 'org_1',
-        name: input.name || 'Placeholder Project',
-        description: input.description !== undefined ? input.description : null,
-        tags: input.tags || [],
-        created_at: new Date(),
-        updated_at: new Date()
-    });
+  try {
+    // Build the update values object dynamically
+    const updateValues: Partial<typeof projectsTable.$inferInsert> = {
+      updated_at: new Date()
+    };
+
+    if (input.name !== undefined) {
+      updateValues.name = input.name;
+    }
+    if (input.description !== undefined) {
+      updateValues.description = input.description;
+    }
+    if (input.tags !== undefined) {
+      updateValues.tags = input.tags;
+    }
+
+    const result = await db.update(projectsTable)
+      .set(updateValues)
+      .where(eq(projectsTable.id, input.id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Project not found');
+    }
+
+    const project = result[0];
+    return {
+      ...project,
+      tags: project.tags as string[] // Cast jsonb back to string array
+    };
+  } catch (error) {
+    console.error('Project update failed:', error);
+    throw error;
+  }
 }
 
 export async function deleteProject(id: string): Promise<void> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is deleting a project and all its associated data.
-    return Promise.resolve();
+  try {
+    const result = await db.delete(projectsTable)
+      .where(eq(projectsTable.id, id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Project not found');
+    }
+  } catch (error) {
+    console.error('Project deletion failed:', error);
+    throw error;
+  }
 }

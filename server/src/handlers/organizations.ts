@@ -1,87 +1,241 @@
+import { db } from '../db';
+import { organizationsTable, membershipsTable, usersTable } from '../db/schema';
 import { type CreateOrganizationInput, type Organization, type UpdateOrganizationInput, type CreateMembershipInput, type Membership, type UpdateMembershipInput } from '../schema';
+import { eq, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
 export async function createOrganization(input: CreateOrganizationInput): Promise<Organization> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is creating a new organization with the owner user.
-    return Promise.resolve({
-        id: 'org_1',
+  try {
+    // Verify the owner user exists
+    const user = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, input.owner_user_id))
+      .execute();
+
+    if (user.length === 0) {
+      throw new Error('Owner user not found');
+    }
+
+    // Generate a unique ID
+    const id = `org_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+    // Insert organization record
+    const result = await db.insert(organizationsTable)
+      .values({
+        id,
         name: input.name,
         slug: input.slug,
         owner_user_id: input.owner_user_id,
         plan: input.plan || 'free',
-        created_at: new Date()
-    });
+      })
+      .returning()
+      .execute();
+
+    // Create owner membership
+    const membershipId = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    await db.insert(membershipsTable)
+      .values({
+        id: membershipId,
+        org_id: id,
+        user_id: input.owner_user_id,
+        role: 'owner',
+      })
+      .execute();
+
+    return result[0];
+  } catch (error) {
+    console.error('Organization creation failed:', error);
+    throw error;
+  }
 }
 
 export async function getOrganizationById(id: string): Promise<Organization | null> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching an organization by ID.
-    return null;
+  try {
+    const result = await db.select()
+      .from(organizationsTable)
+      .where(eq(organizationsTable.id, id))
+      .execute();
+
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('Failed to get organization by ID:', error);
+    throw error;
+  }
 }
 
 export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching an organization by its slug.
-    return null;
+  try {
+    const result = await db.select()
+      .from(organizationsTable)
+      .where(eq(organizationsTable.slug, slug))
+      .execute();
+
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('Failed to get organization by slug:', error);
+    throw error;
+  }
 }
 
 export async function updateOrganization(input: UpdateOrganizationInput): Promise<Organization> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is updating organization details.
-    return Promise.resolve({
-        id: input.id,
-        name: input.name || 'Placeholder Org',
-        slug: input.slug || 'placeholder-org',
-        owner_user_id: 'user_1',
-        plan: input.plan || 'free',
-        created_at: new Date()
-    });
+  try {
+    // Build update values object with only defined fields
+    const updateValues: Partial<typeof organizationsTable.$inferInsert> = {};
+    
+    if (input.name !== undefined) {
+      updateValues.name = input.name;
+    }
+    if (input.slug !== undefined) {
+      updateValues.slug = input.slug;
+    }
+    if (input.plan !== undefined) {
+      updateValues.plan = input.plan;
+    }
+
+    const result = await db.update(organizationsTable)
+      .set(updateValues)
+      .where(eq(organizationsTable.id, input.id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Organization not found');
+    }
+
+    return result[0];
+  } catch (error) {
+    console.error('Organization update failed:', error);
+    throw error;
+  }
 }
 
 export async function getOrganizationsByUserId(userId: string): Promise<Organization[]> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching all organizations where the user is a member.
-    return [];
+  try {
+    const result = await db.select({
+      id: organizationsTable.id,
+      name: organizationsTable.name,
+      slug: organizationsTable.slug,
+      owner_user_id: organizationsTable.owner_user_id,
+      plan: organizationsTable.plan,
+      created_at: organizationsTable.created_at,
+    })
+      .from(organizationsTable)
+      .innerJoin(membershipsTable, eq(organizationsTable.id, membershipsTable.org_id))
+      .where(eq(membershipsTable.user_id, userId))
+      .execute();
+
+    return result;
+  } catch (error) {
+    console.error('Failed to get organizations by user ID:', error);
+    throw error;
+  }
 }
 
 export async function createMembership(input: CreateMembershipInput): Promise<Membership> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is adding a user as a member to an organization.
-    return Promise.resolve({
-        id: 'membership_1',
+  try {
+    // Verify the organization exists
+    const org = await db.select()
+      .from(organizationsTable)
+      .where(eq(organizationsTable.id, input.org_id))
+      .execute();
+
+    if (org.length === 0) {
+      throw new Error('Organization not found');
+    }
+
+    // Verify the user exists
+    const user = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, input.user_id))
+      .execute();
+
+    if (user.length === 0) {
+      throw new Error('User not found');
+    }
+
+    // Generate a unique ID
+    const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+
+    // Insert membership record
+    const result = await db.insert(membershipsTable)
+      .values({
+        id,
         org_id: input.org_id,
         user_id: input.user_id,
         role: input.role,
-        created_at: new Date()
-    });
+      })
+      .returning()
+      .execute();
+
+    return result[0];
+  } catch (error) {
+    console.error('Membership creation failed:', error);
+    throw error;
+  }
 }
 
 export async function updateMembership(input: UpdateMembershipInput): Promise<Membership> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is updating a user's role in an organization.
-    return Promise.resolve({
-        id: input.id,
-        org_id: 'org_1',
-        user_id: 'user_1',
-        role: input.role,
-        created_at: new Date()
-    });
+  try {
+    const result = await db.update(membershipsTable)
+      .set({ role: input.role })
+      .where(eq(membershipsTable.id, input.id))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Membership not found');
+    }
+
+    return result[0];
+  } catch (error) {
+    console.error('Membership update failed:', error);
+    throw error;
+  }
 }
 
 export async function getMembershipsByOrgId(orgId: string): Promise<Membership[]> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching all members of an organization.
-    return [];
+  try {
+    const result = await db.select()
+      .from(membershipsTable)
+      .where(eq(membershipsTable.org_id, orgId))
+      .execute();
+
+    return result;
+  } catch (error) {
+    console.error('Failed to get memberships by org ID:', error);
+    throw error;
+  }
 }
 
 export async function getUserMembership(userId: string, orgId: string): Promise<Membership | null> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is fetching a user's membership in a specific organization.
-    return null;
+  try {
+    const result = await db.select()
+      .from(membershipsTable)
+      .where(and(
+        eq(membershipsTable.user_id, userId),
+        eq(membershipsTable.org_id, orgId)
+      ))
+      .execute();
+
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('Failed to get user membership:', error);
+    throw error;
+  }
 }
 
 export async function deleteMembership(membershipId: string): Promise<void> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is removing a user from an organization.
-    return Promise.resolve();
+  try {
+    const result = await db.delete(membershipsTable)
+      .where(eq(membershipsTable.id, membershipId))
+      .returning()
+      .execute();
+
+    if (result.length === 0) {
+      throw new Error('Membership not found');
+    }
+  } catch (error) {
+    console.error('Membership deletion failed:', error);
+    throw error;
+  }
 }
